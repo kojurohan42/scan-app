@@ -3,10 +3,14 @@ import 'dart:convert';
 import 'dart:developer';
 import 'dart:io';
 
+import 'package:edge_detection/edge_detection.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:loading_overlay/loading_overlay.dart';
+import 'package:path/path.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../reusable_widgets/expandable_fab.dart';
 
@@ -14,23 +18,93 @@ class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  // ignore: library_private_types_in_public_api
+  _MyHomePageState createState() => _MyHomePageState();
 }
 
 class _MyHomePageState extends State<MyHomePage> {
+  String? _imagePath;
   String? message = '';
   File? selectedImage;
   bool isLoading = false;
   final ImagePicker _picker = ImagePicker();
-  Future getImage() async {
-    final pickedImage = await _picker.pickImage(source: ImageSource.gallery);
-    selectedImage = File(pickedImage!.path);
-
-    setState(() {});
+  @override
+  void initState() {
+    super.initState();
   }
 
-  Future getImageFromCamera() async {
-    final pickedImage = await _picker.pickImage(source: ImageSource.camera);
+  Future<void> getImageFromCamera() async {
+    bool isCameraGranted = await Permission.camera.request().isGranted;
+    if (!isCameraGranted) {
+      isCameraGranted =
+          await Permission.camera.request() == PermissionStatus.granted;
+    }
+
+    if (!isCameraGranted) {
+      // Have not permission to camera
+      return;
+    }
+
+    // Generate filepath for saving
+    String imagePath = join((await getApplicationSupportDirectory()).path,
+        "${(DateTime.now().millisecondsSinceEpoch / 1000).round()}.jpeg");
+
+    try {
+      //Make sure to await the call to detectEdge.
+      bool success = await EdgeDetection.detectEdge(
+        imagePath,
+        canUseGallery: true,
+        androidScanTitle: 'Scanning', // use custom localizations for android
+        androidCropTitle: 'Crop',
+        androidCropBlackWhiteTitle: 'Black White',
+        androidCropReset: 'Reset',
+      );
+      print("success: $success");
+    } catch (e) {
+      print(e);
+    }
+
+    // If the widget was removed from the tree while the asynchronous platform
+    // message was in flight, we want to discard the reply rather than calling
+    // setState to update our non-existent appearance.
+    if (!mounted) return;
+
+    setState(() {
+      _imagePath = imagePath;
+      selectedImage = File(_imagePath ?? '');
+    });
+  }
+
+  // Future<void> getImageFromGallery() async {
+  //   // Generate filepath for saving
+  //   String imagePath = join((await getApplicationSupportDirectory()).path,
+  //       "${(DateTime.now().millisecondsSinceEpoch / 1000).round()}.jpeg");
+
+  //   try {
+  //     //Make sure to await the call to detectEdgeFromGallery.
+  //     bool success = await EdgeDetection.detectEdgeFromGallery(
+  //       imagePath,
+  //       androidCropTitle: 'Crop', // use custom localizations for android
+  //       androidCropBlackWhiteTitle: 'Black White',
+  //       androidCropReset: 'Reset',
+  //     );
+  //     log("success: $success");
+  //   } catch (e) {
+  //     log(e.toString());
+  //   }
+
+  //   // If the widget was removed from the tree while the asynchronous platform
+  //   // message was in flight, we want to discard the reply rather than calling
+  //   // setState to update our non-existent appearance.
+  //   if (!mounted) return;
+
+  //   setState(() {
+  //     _imagePath = imagePath;
+  //     selectedImage = File(_imagePath ?? '');
+  //   });
+  // }
+  Future getImageFromGallery() async {
+    final pickedImage = await _picker.pickImage(source: ImageSource.gallery);
     selectedImage = File(pickedImage!.path);
 
     setState(() {});
@@ -40,6 +114,7 @@ class _MyHomePageState extends State<MyHomePage> {
     setState(() {
       isLoading = true;
     });
+
     final request = http.MultipartRequest(
         "POST", Uri.parse("http://localhost:4000/upload"));
     final headers = {"Content-type": "multipart/form-data"};
@@ -60,22 +135,6 @@ class _MyHomePageState extends State<MyHomePage> {
     //await convertToPdf(message); // Convert the extracted text to PDF
   }
 
-  // Function to create PDF and insert the extracted text
-  /*Future<void> convertToPdf(String? extractedText) async {
-    final pdf = pdfWidgets.Document();
-    pdf.addPage(
-      pdfWidgets.Page(
-        build: (context) {
-          return pdfWidgets.Center(
-            child: pdfWidgets.Text(extractedText ?? ''),
-          );
-        },
-      ),
-    );
-
-    final output = await File('output.pdf').create();
-    await output.writeAsBytes(await pdf.save());
-  }*/
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -96,17 +155,17 @@ class _MyHomePageState extends State<MyHomePage> {
           ),
           ActionButton(
             title: 'Gallery',
-            onPressed: getImage,
+            onPressed: getImageFromGallery,
             icon: const Icon(Icons.photo_album),
           ),
         ],
       ),
       body: LoadingOverlay(
         isLoading: isLoading,
-        child: SingleChildScrollView(
-          child: selectedImage == null
-              ? const Center(child: Text("Please pick a image to scan"))
-              : Column(
+        child: selectedImage == null
+            ? const Center(child: Text("Please pick a image to scan"))
+            : SingleChildScrollView(
+                child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: <Widget>[
                     Image.file(selectedImage!, fit: BoxFit.contain),
@@ -142,8 +201,9 @@ class _MyHomePageState extends State<MyHomePage> {
                     )
                   ],
                 ),
-        ),
+              ),
       ),
     );
   }
-}// ngrok http 4000
+}
+// ngrok http 4000
